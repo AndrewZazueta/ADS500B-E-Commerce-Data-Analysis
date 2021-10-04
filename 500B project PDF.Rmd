@@ -1,0 +1,581 @@
+---
+title: "E-Commerce Data Analysis"
+author: "Ramin Barfinezhadfeli, Jack McCullers, Andrew Zazueta"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load libraries and setting work directory
+
+```{r, message=FALSE, warning=FALSE}
+library("tidyverse")
+library("gmodels")
+library("funModeling")
+library("GGally")
+library("e1071")
+library("class")
+library("psych")
+setwd("C:/Users/mzazu/OneDrive/Documents/USD papers/500B")
+```
+
+# 1. Data Importing and Pre-processing 
+
+The first code cell of this section showcases loading in the CSV file and taking a look at its contents before manipulating any of the data. The CSV file contains information on e-commerce transactions taken throughout a year. Each row represents a single session, and the columns describe what kind of sites the user was on and how long they were on, and also if a transaction was made or not. 
+
+```{r}
+# imported data by loading the tidyverse library and used the function "read_csv()" to make 
+# a tibble called "commerce" which holds all the data from the CSV file.
+commerce <- read_csv("online_shoppers_intention.csv")
+
+# dimensions: 12330 rows and 18 columns
+dim(commerce)
+
+# data types
+glimpse(commerce)
+```
+
+The majority of data types within this dataframe are doubles, which are numeric. There is one character data type in the Month column and logical data types in the Weekend and Revenue columns. The logical data type columns are TRUE if a visitor was on during a weekend and TRUE if a purchase was made. It is FALSE otherwise. 
+
+The second code cell in this section shows code which gets rid of any NA's in the dataframe. This was executed by simply reading the rows which had complete cases (no NA's) and ignoring the rows which did not. The old tibble was read over with the new tibble. 
+
+```{r}
+# getting rid of any rows with NA's. The 0's in the data all appear to be correct and should 
+# not be altered. The reasoning behind getting rid of the NA's instead of trying to replace 
+# these values is due to not wanting to make up data we have no information about. 
+
+commerce <- commerce[complete.cases(commerce),]
+```
+
+The next code cell tried to transform the data using various techniques. The technique used here is feature construction. Feature construction is when existing data is altered to make it easier to make predictions or handle other data related tasks. Looking at the commerce data, it was noticed that the dataframe had its months randomly ordered. To fix this, each month was assigned its numerical value in a new column titled "MonthNum." Then, it was ordered so that so that each row was in calender order starting at February (two months are missing from the data: January and April). More compact methods of coding like using the library "Lubridate" were tried. However, the Month column could not be changed to a date-time data type due to the characters in the column being "not in a standard unambiguous format," so functions were not able to transform the data itself. This process can help future analysis by making grouping data by month easier.  
+
+```{r}
+# making a new column in the tibble
+commerce <- commerce %>% 
+  mutate(MonthNum = Month)
+
+# giving each month its numrical value
+for(i in 1:length(commerce$MonthNum)){
+  if(commerce[i, "Month"] == "Feb")
+  {
+    commerce[i, "MonthNum"] <- "2"
+  }
+  if(commerce[i, "Month"] == "Mar")
+  {
+    commerce[i, "MonthNum"] <- "3"
+  }
+  if(commerce[i, "Month"] == "May")
+  {
+    commerce[i, "MonthNum"] <- "5"
+  }
+  if(commerce[i, "Month"] == "June")
+  {
+    commerce[i, "MonthNum"] <- "6"
+  }
+  if(commerce[i, "Month"] == "Jul")
+  {
+    commerce[i, "MonthNum"] <- "7"
+  }
+  if(commerce[i, "Month"] == "Aug")
+  {
+    commerce[i, "MonthNum"] <- "8"
+  }
+  if(commerce[i, "Month"] == "Sep")
+  {
+    commerce[i, "MonthNum"] <- "9"
+  }
+  if(commerce[i, "Month"] == "Oct")
+  {
+    commerce[i, "MonthNum"] <- "10"
+  }
+  if(commerce[i, "Month"] == "Nov")
+  {
+    commerce[i, "MonthNum"] <- "11"
+  }
+  if(commerce[i, "Month"] == "Dec")
+  {
+    commerce[i, "MonthNum"] <- "12"
+  }
+}
+
+# the numbers have to be converted to a numeric data type due to the column being a character 
+# data type when the mutate function was called. 
+commerce$MonthNum <- as.numeric(commerce$MonthNum)
+
+# ordering the rows by month
+commerce <- commerce[order(commerce$MonthNum),]
+```
+
+The last code cell for this section is to remove redundant data and perform need based discretization. The columns "operatingSystems," "Browser," "Region," and "TrafficType" were removed because the numbers in these columns gave no information that could be utilized. There is no way to know what "Region 9" is, what "Browser 1" is, etc. Next, need based discretization was performed by making a new column for Page Vales titled "PageValueRank." The "PageValues" column "represents the average value for a web page that a user visited before completing an e-commerce transaction." The purpose of the new column "PageValueRank" is to assign rows with four different categories: "No Purchase," "Low Page Value," "Medium Page Value," and "High Page Value." If no e-commerce trade is performed, there can be no average time before completing an e-commerce transaction, so by default these values are zero. So, whenever the Revenue column read "FALSE," the category the page value was assigned to was "No Purchase." If the Revenue column read "TRUE," then the three other categories were assigned based on the value of the page values. Page values less than or equal to 40 were given the "Low Page Value" rank. Page values between 40 and 80 were assigned "Medium Page Value," and "High Page Value" was given to page values greater than 80. This process was done so that data analysis can be preformed on different page value rank categories to see if there is anything interesting or different in each one. 
+
+```{r, message=FALSE}
+# removing columns that give us no useful information
+commerce <- commerce %>%
+  select(-OperatingSystems, -Browser, -Region, -TrafficType)
+
+# There are a lot of  0's in the PageValues variable due to most of the sessions not resulting 
+# in a purchase, so a new column was made to divide these values into 4 parts, "No Purchase",
+# "Low Page Value", "Medium Page Value", and "High Page Value." These categories are in the new
+# column titled "PageValueRank".  
+
+commerce <- 
+  commerce %>% 
+  mutate(PageValueRank = PageValues)
+
+commerce$PageValueRank <- as.character(commerce$PageValueRank)
+
+for(i in 1:length(commerce$PageValues)){
+  if(commerce[i, "Revenue"] == FALSE)
+  {
+    commerce[i, "PageValueRank"] <- "No Purchase"
+  }
+  else
+  {
+    if(commerce[i, "PageValues"] <= 40)
+    {
+      commerce[i, "PageValueRank"] <- "Low Page Value"
+    }
+    if(commerce[i, "PageValues"] > 40 & commerce[i, "PageValues"] <= 80)
+    {
+      commerce[i, "PageValueRank"] <- "Medium Page Value"
+    }
+    if(commerce[i, "PageValues"] > 80)
+    {
+      commerce[i, "PageValueRank"] <- "High Page Value"
+    }
+  }
+}
+
+# It is interesting to see that there are some page values above 0 when it states that revenue is
+# false for that session. I am unsure if this is an error or not. There are page values that
+# exceed 300 that cannot be seen due to the count of zeros being so large in comparison. 
+commerce %>%
+  ggplot(aes(PageValues, fill = PageValueRank)) +
+  geom_histogram() +
+  labs(title = "Histogram of Page Values and their Rank", y = "Count")
+```
+
+It can be noticed in this histogram that there are some pages values are above 0 but still list revenue as "FALSE." Also, there are times when a purchase was made, but the average page value is 0. Both of these occurrences in the data are contradictory. 
+
+# 2. Data Analytics and Visualization 
+
+We want to identify categorical, ordinal, and numerical variables within dataframe:
+The dataset consists of:
+-  5 categorical attributes:
+      (OperatingSystems,	Browser, Region,	TrafficType,	VisitorType) 
+-  2 binary attributes:
+      (Weekend,	Revenue) 
+-  1 ordinal attributes:
+      (Month) 
+-  10 numerical attributes:
+      (Administrative,	Administrative_Duration,	Informational,
+      Informational_Duration,	ProductRelated,	ProductRelated_Duration,
+      BounceRates,	ExitRates,	PageValues,	SpecialDay)
+      
+```{r}
+knitr::kable(sapply(commerce, class), "simple",col.names = c('Data type'))
+```
+
+As we see the target variable is a boolian variable with 1042 FALSE and 1908 
+TRUE values.
+
+```{r}
+summary(commerce$Revenue)
+```
+
+Now we convert Revenue field to 0,1 values.
+
+```{r}
+commerce <- commerce %>% mutate(Revenue = ifelse(Revenue == "FALSE",0,1))
+```
+
+### Exploratory Data Analysis: Numerical Analysis
+
+We visually analyze to see revenue for users is they are Administrative or not.
+Lets see histogram of all the continuous variables.
+
+```{r}
+commerceNumberics <- commerce[,0:10]
+plot_num(commerceNumberics) 
+```
+
+### Administrative
+
+As we see in most of cases there was no revenue when page view was from Administrative.
+
+```{r}
+summary(commerce$Administrative)
+
+ggplot() +
+aes(x = commerce$Administrative) +
+geom_histogram(bins = 10) +
+geom_bar() +
+facet_grid(commerce$Revenue ~ .)
+```
+
+### Administrative_Duration
+
+```{r}
+summary(commerce$Administrative_Duration)
+
+ggplot() +
+aes(x = commerce$Administrative_Duration) +
+geom_histogram(bins = 10) +
+facet_grid(commerce$Revenue ~ .,
+           scales = "free_y")
+
+```
+
+### Bounce Rates
+
+Plot shows to have higher Revenue we need to have lower BounceRates.
+
+```{r}
+summary(commerce$BounceRates)
+
+ggplot() +
+aes(x = commerce$BounceRates) +
+geom_histogram(bins = 10) +
+facet_grid(commerce$Revenue ~ .,
+           scales = "free_y")
+```
+
+### ExitRates
+
+Plot shows to have higher revenue we need to have lower ExitRates
+Also we see in some pages we had high Exit rate and higher count of conversions.
+we assume those conversions happened on the checkout page and we consider them
+as outliers.
+
+```{r}
+ggplot() +
+aes(x = commerce$ExitRates) +
+geom_histogram(bins = 50) +
+facet_grid(commerce$Revenue ~ .,
+           scales = "free_y") #outliers
+```
+
+```{r}
+boxplot(ExitRates~Revenue,data=commerce, main="ExitRates Vs. Had Revenue",
+   xlab="Exit Rates", ylab="Had Revenue")
+
+summary(commerce$ExitRates)
+```
+
+In the box plot we see there are outliers for those pageviews had revenue,
+so we need to handle the outliers:
+
+```{r}
+# with quantile() we find the 25th and the 75th percentile of the dataset.
+# with IQR() gives us the difference of the 75th and 25th percentiles
+Q <- quantile(commerce$ExitRates, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(commerce$ExitRates)
+up <-  Q[2]+1.3*iqr # Upper Range 
+low<- Q[1]-1.3*iqr # Lower Range
+# Eliminating Outliers
+commerce<- subset(commerce, commerce$ExitRates > (low) & commerce$ExitRates < (up))
+```
+
+Check outliers again
+
+```{r}
+ggplot() +
+aes(x = commerce$ExitRates) +
+geom_histogram(bins = 50) +
+facet_grid(commerce$Revenue ~ .,
+           scales = "free_y") #outliers
+```
+
+We check to see if we could handle the outliers for Exit Rates:
+
+```{r}
+boxplot(ExitRates~Revenue,data=commerce, main="ExitRates Vs. Had Revenue",
+   xlab="Exit Rates", ylab="Had Revenue")
+
+summary(commerce$ExitRates)
+```
+
+### SpecialDay
+
+SpecialDay indicates the amount of closeness of the visiting time to a special day. The chart clearly shows in special days site had more sales.
+
+```{r}
+summary(commerce$SpecialDay)
+
+ggplot() +
+aes(x = commerce$SpecialDay) +
+geom_histogram(bins = 10) +
+facet_grid(commerce$Revenue ~ .,
+           scales = "free_y")
+```
+
+### Categorical fields Analysis: frequency plots of catergorical variables
+
+```{r message=FALSE, warning=FALSE}
+commerceCatergorical <- commerce[11:16]
+
+commerceCatergorical$Weekend<- as.factor(commerceCatergorical$Weekend)
+commerceCatergorical$Revenue<- as.factor(commerceCatergorical$Revenue)
+print(freq(commerceCatergorical))
+```
+
+We want to find correlation between columns lets take a look at all columns to have a big picture of any potential correlation between fields. Now we plot our new data frame to visually inspect the data:
+
+```{r, warning=FALSE}
+commerce$Month<- as.numeric(commerce$Month)
+commerce$VisitorType<- as.numeric(commerce$VisitorType)
+commerce$PageValueRank <- as.numeric(commerce$PageValueRank)
+ggcorr(cor(commerce))
+```
+
+As we see there is strong correlation between Revenue and some of other columns.
+
+list of strong positive correlations with revenue:
+1- Page Values
+2- ProductRelated_Duration
+3- ProductRelated
+4- Administrative	
+5- Administrative_Duration
+
+list of strong negative correlations:
+1- BounceRates	
+2- ExitRates
+
+```{r}
+pairs.panels(commerceNumberics)
+```
+
+Here we see lots of strong correlation between fields, for example lets see correlation between BounceRates and ExitRates we are looking for a formula to predict BounceRates based on ExitRates, first lets see the relation visually:
+
+```{r message=FALSE, warning=FALSE}
+BounceRates.ExitRates.lm <- lm(BounceRates~ExitRates, data = commerceNumberics)
+BounceRates.ExitRates.lm
+a = BounceRates.ExitRates.lm[[1]][1]
+b = BounceRates.ExitRates.lm[[1]][2]
+plot(commerceNumberics$BounceRates,commerceNumberics$ExitRates)+
+abline(a, b)
+```
+
+We see a positive strong correlation between BounceRates and ExitRates so we 
+want to have a formula to predict BounceRates based on ExitRates and calculate 
+Coefficent and intercept of predictor and have a formula like:
+BounceRates= -0.01702 + 0.9101206  * ExitRates
+BounceRates= 0.02399892 + -0.0003090976  * PageValues
+
+### Sample of strong correlation:
+
+```{r}
+BounceRates.ExitRates.lm <- lm(BounceRates~ExitRates, data = commerceNumberics)
+a = BounceRates.ExitRates.lm[[1]][1]
+b = BounceRates.ExitRates.lm[[1]][2]
+cat("BounceRates=",a,"+",b," * ExitRates")
+```
+
+### Sample of weak correlation:
+
+```{r}
+BounceRates.PageValues.lm <- lm(BounceRates~PageValues, data = commerceNumberics)
+a = BounceRates.PageValues.lm[[1]][1]
+b = BounceRates.PageValues.lm[[1]][2]
+cat("BounceRates=",a,"+",b," * PageValues")
+```
+
+# 3. Data Analysis 
+
+The first analytics performed was developing a linear regression model looking at product related duration and product related. We anticipate that these columns will have strong correlation and a high R squared. This was done to establish a baseline test of the data set. 
+
+```{r}
+Linmodel<- lm(ProductRelated_Duration ~ ProductRelated, data = commerce)
+Linmodel
+summary(Linmodel)
+cor(commerce$ProductRelated_Duration, commerce$ProductRelated)
+#Here we identified the correlation between all numeric variables within our dataset.
+cor(commerce[,unlist(lapply(commerce, is.numeric))])
+```
+
+The R-squared was roughly .74 which means the model explains 74% of the variance. This strong relationship was anticipated. We will explore further in-depth analysis with multiple supervised learning techniques.
+
+### Multiple Linear Regression
+
+```{r}
+fit<-lm(MonthNum~Administrative + Informational + ProductRelated, data = commerce)
+
+summary(fit)
+```
+
+As we analyze the summary of the multiple linear regression we noticed that it did not cocnlude with a strong model. The model did not perform as the single linear regression model for explaining product related duration with the feature special day. 
+
+Classification with Knn based off feature Revenue. This example of classification was used with the K nearest neighbor method.The point of this study was to be able to correctly classify future data points with the feature of Revenue. K was set to 3 to compare the 3 nearest data points. The commerce dataset was first subsetted to include only the below columns. After that, the subset was broken into samples, to provide for the training of the model and the testing future values. This helps calculate the accuracy of the model.
+
+```{r}
+commerce.subset = commerce[c('Revenue','Administrative','Administrative_Duration',
+                        'Informational','Informational_Duration','ProductRelated',
+                        'ProductRelated_Duration','BounceRates','ExitRates')]
+set.seed(123)
+
+ind<-sample(2, nrow(commerce.subset), replace=TRUE,)
+
+commerce.subset.train<- commerce.subset[ind==1, 1:9]
+commerce.subset.test<- commerce.subset[ind==2, 1:9]
+
+commerce.trainLabels<-commerce.subset[ind==1,1]
+commerce.testLabels<- commerce.subset[ind==2,1]
+
+commerce_pred<-knn(train=commerce.subset.train, test=commerce.subset.test,
+                   cl=commerce.trainLabels$Revenue, k=3)
+summary(commerce_pred)
+
+CrossTable(x=commerce_pred, y=commerce.testLabels$Revenue,prop.chisq = FALSE)
+
+accuracy=((4646+99)/5931)
+accuracy
+```
+
+We had an 80% accuracy for predicting Revenue off the classification predition model above. Out of the total 5931 observations, the model correctly precicted 4745 instances. The CrossTable outlines the False and True table outputs. Based off this cross-tabulation we can see how our predictions matched up with the truth.
+
+Linear Regression of Bounce Rates was perfomred using ggplot. This compared the features Exit rates and Bounce rates for the pages. We can see that there is a slight positive relationship between these two features.
+
+```{r, warning=FALSE}
+ggplot(commerce, aes(x=ExitRates, y=BounceRates)) +
+  geom_point() + 
+  stat_smooth(method = "lm") +
+  ylim(0.01,1)
+
+lm(BounceRates~ExitRates,commerce)
+```
+
+The linear regression model for bounce rates allows us to predict the bounce rate based off knowing the exit rate for the site. The regression model has an equation of yhat= -.01702+ .91012(x).
+
+### Conducting OLS regression for Exit Rates based off Product Related Duration
+
+```{r, warning=FALSE}
+NROW(commerce.subset$ExitRates)
+
+ggplot(commerce.subset, aes(x=ProductRelated_Duration, y=ExitRates)) +
+  geom_point() + 
+  geom_smooth(method="lm") + 
+  scale_x_continuous(limits = c(0,20000), expand=c(0,1000))+theme_bw()
+
+ggplot(commerce.subset, aes(x=ProductRelated_Duration, y=ExitRates)) +
+  geom_point() + 
+  geom_smooth() + 
+  scale_x_continuous(limits = c(0,20000), expand=c(0,0)) + 
+  theme_bw()
+
+```
+
+When conducting this OLS regression we noticed that a smoothing method of linear did not accurately capture the tail end of the graph. Removing the linear smoothing allowed us to notice that as the product related duration increases we have a larger gap for possible exit rates.
+
+A Naive Bayes model was completed next. This supervised learning method utilizes Bayes theorem to predict the feature Revenue based off the commerce dataset. After installing the e1071 package we then split up the dataset into training and testing samples. 70% of the datset was used as a training set, while the other 30% will be used to test the model. 
+
+```{r, echo=FALSE, message=FALSE}
+commerce <- read_csv("online_shoppers_intention.csv")
+
+commerce <- commerce[complete.cases(commerce),]
+
+commerce <- commerce %>% 
+  mutate(MonthNum = Month)
+
+for(i in 1:length(commerce$MonthNum)){
+  if(commerce[i, "Month"] == "Feb")
+  {
+    commerce[i, "MonthNum"] <- "2"
+  }
+  if(commerce[i, "Month"] == "Mar")
+  {
+    commerce[i, "MonthNum"] <- "3"
+  }
+  if(commerce[i, "Month"] == "May")
+  {
+    commerce[i, "MonthNum"] <- "5"
+  }
+  if(commerce[i, "Month"] == "June")
+  {
+    commerce[i, "MonthNum"] <- "6"
+  }
+  if(commerce[i, "Month"] == "Jul")
+  {
+    commerce[i, "MonthNum"] <- "7"
+  }
+  if(commerce[i, "Month"] == "Aug")
+  {
+    commerce[i, "MonthNum"] <- "8"
+  }
+  if(commerce[i, "Month"] == "Sep")
+  {
+    commerce[i, "MonthNum"] <- "9"
+  }
+  if(commerce[i, "Month"] == "Oct")
+  {
+    commerce[i, "MonthNum"] <- "10"
+  }
+  if(commerce[i, "Month"] == "Nov")
+  {
+    commerce[i, "MonthNum"] <- "11"
+  }
+  if(commerce[i, "Month"] == "Dec")
+  {
+    commerce[i, "MonthNum"] <- "12"
+  }
+}
+
+commerce$MonthNum <- as.numeric(commerce$MonthNum)
+
+commerce <- commerce[order(commerce$MonthNum),]
+
+commerce <- commerce %>%
+  select(-OperatingSystems, -Browser, -Region, -TrafficType)
+
+commerce <- 
+  commerce %>% 
+  mutate(PageValueRank = PageValues)
+
+commerce$PageValueRank <- as.character(commerce$PageValueRank)
+
+for(i in 1:length(commerce$PageValues)){
+  if(commerce[i, "Revenue"] == FALSE)
+  {
+    commerce[i, "PageValueRank"] <- "No Purchase"
+  }
+  else
+  {
+    if(commerce[i, "PageValues"] <= 40)
+    {
+      commerce[i, "PageValueRank"] <- "Low Page Value"
+    }
+    if(commerce[i, "PageValues"] > 40 & commerce[i, "PageValues"] <= 80)
+    {
+      commerce[i, "PageValueRank"] <- "Medium Page Value"
+    }
+    if(commerce[i, "PageValues"] > 80)
+    {
+      commerce[i, "PageValueRank"] <- "High Page Value"
+    }
+  }
+}
+```
+
+```{r}
+set.seed(123)
+id<- sample(2,nrow(commerce), prob = c(0.7, 0.3), replace = T)
+ComTrain<- commerce[id==1,]
+ComTest<- commerce[id==2,]
+
+comModel<- naiveBayes(Revenue~., data = ComTrain)
+print(comModel)
+
+prediction<-predict(comModel, newdata = ComTest)
+#print(prediction)
+
+table(prediction, ComTest$Revenue)
+
+accuracy=((2837+534)/nrow(ComTest))
+accuracy
+nrow(ComTest)
+```
+
+The output of the comModel contained a likelihood table as well as a-prioriprobabilities. This showed the frequency of the features, which would help us predict which predictors we would anticipate seeing in future. The prediction of Revenue will be influenced by the predictors in the dataset as well as their prevalence. To compare the accuracy of the model we created a table to display the correct predictions of Revenue from the test dataset. Here the accuracy was roughly 95%. Based on the table, the model correctly predicted 3371 of the 3551 testing data points.This is a highly reliable model utilizing Bayes theorem. 
